@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Amazon Product Crawler",
+  "version": "1.0",
+  "permissions": ["tabs", "scripting", "activeTab"],
+  "host_permissions": ["https://www.amazon.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.amazon.com/*"],
+      "js": ["scrapper/content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://shopee.co.id/*"],
+      "js": ["scrapper/shopee.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

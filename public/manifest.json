@@ -7,5 +7,25 @@
   "action": {
     "default_popup": "index.html",
     "default_icon": "icon.png"
-  }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": ["scripting", "tabs", "storage", "activeTab"],
+  "content_scripts": [
+    {
+      "matches": ["https://shopee.co.id/*"],
+      "js": ["scrapers/shopee_id.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "https://*.tokopedia.com/*",
+    "https://*.shopee.co.id/*",
+    "https://shopee.co.id/*",
+
+    "https://*.lazada.co.id/*"
+  ]
 }
