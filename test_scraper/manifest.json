@@ -17,7 +17,7 @@
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://shopee.co.id/*"],
+      "matches": ["https://shopee.co.id/search*"],
       "js": ["scrapper/shopee.js"],
       "run_at": "document_idle"
     }

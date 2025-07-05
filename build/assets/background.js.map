@@ -1,0 +1,1 @@
+{"version":3,"file":"background.js","sources":["../../src/background.ts"],"sourcesContent":["chrome.runtime.onInstalled.addListener(() => {\n  console.log(\"Extension installedss.\");\n});\n"],"names":[],"mappings":"AAAA,OAAO,QAAQ,YAAY,YAAY,IAAM,CAC3C,QAAQ,IAAI,wBAAwB,CACtC,CAAC"}

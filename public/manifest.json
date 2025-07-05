@@ -15,8 +15,13 @@
   "permissions": ["scripting", "tabs", "storage", "activeTab"],
   "content_scripts": [
     {
-      "matches": ["https://shopee.co.id/*"],
+      "matches": ["https://shopee.co.id/search*"],
       "js": ["scrapers/shopee_id.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://*.lazada.co.id/catalog*"],
+      "js": ["scrapers/lazada_id.js"],
       "run_at": "document_idle"
     }
   ],
