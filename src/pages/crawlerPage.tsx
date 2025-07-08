@@ -8,11 +8,90 @@ import getCurrentMarketplaceFromURL from "../utils/getCurrentMarketplaceFromURL"
 import GithubIcon from "../icons/github";
 import ShoppingCart from "../icons/shopping-cart";
 import { Link } from "react-router-dom";
+import AreTheseTwoArraysEqualUnordered from "../utils/AreTheseTwoArraysEqualUnordered";
+import StarIcon from "../icons/starIcon";
+
+type Product = {
+  title: string;
+  price: string;
+  link: string;
+  imgSrc: string;
+  sold: string;
+  rating: string;
+
+  delivery: string;
+  source: string;
+};
+
+type Variant = "horizontal-row" | "vertical-row" | "grid";
+
+function ProductCard({ data, variant }: { data: Product; variant: Variant }) {
+  return (
+    <div
+      className={`relative flex w-full max-w-xs flex-col overflow-hidden rounded-lg border border-gray-100 bg-white shadow-sm product-card-${variant} p-1`}
+    >
+      <a
+        className="relative mx-1 mt-1 flex h-40 overflow-hidden rounded-md"
+        href={data.link}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <img
+          className="object-cover w-full h-full"
+          src={data.imgSrc}
+          alt={data.title}
+        />
+        {/* {data.sold && (
+          <span className="absolute top-0 left-0 m-1 rounded bg-black px-1 text-center text-xs font-medium text-white">
+            Sold: {data.sold}
+          </span>
+        )} */}
+      </a>
+      <div className="mt-2 px-2 pb-2">
+        <a href={data.link} target="_blank" rel="noopener noreferrer">
+          <h5 className="text-sm tracking-tight text-blue-900 line-clamp-2">
+            {data.title}
+          </h5>
+        </a>
+        <div className="mt-1 mb-2 flex items-center justify-between">
+          <p>
+            <span className="text-base font-bold text-blue-600">
+              {data.price}
+            </span>
+          </p>
+        </div>
+        <div className="flex items-center gap-1">
+          <StarIcon />
+          <span className=" rounded bg-yellow-200 px-1.5 py-0.5 text-xs font-semibold">
+            {data.rating ? data.rating : "-"}
+          </span>
+          {/* separator */}
+          <span className="mx-1 h-3 w-px bg-gray-300 inline-block align-middle"></span>
+          <span className="text-xs text-gray-500">{data.sold}</span>
+        </div>
+        <a
+          href={data.link}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-2 bg-neutral-900 flex items-center justify-center rounded px-2 py-1 text-center text-xs font-medium "
+        >
+          <p className="text-white">View</p>
+        </a>
+      </div>
+    </div>
+  );
+}
 
 export default function CrawlerPage() {
+  const [variant] = useState<Variant>("horizontal-row");
+
   const [isFetching, setIsFetching] = useState(false);
   const [availableMarketplaceToFetch, setAvailableMarketplaceToFetch] =
     useState<SupportedMarketplace[]>([]);
+  const [fetchedProducts, setFetchedProducts] = useState<
+    Record<SupportedMarketplace, Array<Product>>
+  >({} as Record<SupportedMarketplace, Array<Product>>);
+
   const url = useRef("");
   const tabId = useRef(0);
   const origin = useRef("");
@@ -65,29 +144,24 @@ export default function CrawlerPage() {
       const crawlTargetSites = [];
       const currentQuery = getCurrentQuery();
 
-      for (const marketplace of Object.keys(
-        marketplaces
-      ) as SupportedMarketplace[]) {
+      for (const marketplace of availableMarketplaceToFetch) {
         if (currentMarketplace != marketplace) {
           crawlTargetSites.push(marketplaces[marketplace]);
         }
       }
 
-      console.log("SEND RUNTIME !!!");
-      chrome.runtime.sendMessage(
-        {
-          type: "CRAWL_TAB_NOW",
-          payload: {
-            url: url.current,
-            marketplace: currentMarketplace,
-            crawlTargetSites: crawlTargetSites,
-            currentQuery: currentQuery,
-          },
+      console.log("availableMarketplaceToFetch", availableMarketplaceToFetch);
+
+      console.log("DO CRAWL NOW !!!");
+      chrome.runtime.sendMessage({
+        type: "CRAWL_TAB_NOW",
+        payload: {
+          url: url.current,
+          marketplace: currentMarketplace,
+          crawlTargetSites: crawlTargetSites,
+          currentQuery: currentQuery,
         },
-        (response) => {
-          console.log("[popup] Response from background:", response);
-        }
-      );
+      });
     }
   }
 
@@ -99,6 +173,39 @@ export default function CrawlerPage() {
       `CRAWL LISTENER , ${tab} ${tab.id} crawlState_${tab.id}`,
       `crawlSites_${tab.id}`
     );
+
+    if (tab.id) {
+      let currentProducts_mainTabs: Partial<
+        Record<SupportedMarketplace, Array<Product>>
+      > = {};
+      const result = await chrome.storage.local.get("products_mainTabs");
+      const duplicate_currentProducts_mainTabs: Partial<
+        Record<SupportedMarketplace, Array<Product>>
+      > = {};
+
+      if ("products_mainTabs" in result) {
+        const products_mainTabs = result["products_mainTabs"];
+        if (tab.id in products_mainTabs) {
+          currentProducts_mainTabs = products_mainTabs[tab.id];
+        }
+      }
+
+      for (const marketplaceOrigin in currentProducts_mainTabs) {
+        const marketplace = getCurrentMarketplaceFromURL(marketplaceOrigin);
+        if (marketplace !== "Not found") {
+          duplicate_currentProducts_mainTabs[marketplace] =
+            currentProducts_mainTabs[
+              marketplaceOrigin as keyof typeof currentProducts_mainTabs
+            ];
+        }
+      }
+
+      console.log("products_mainTabs", currentProducts_mainTabs);
+      setFetchedProducts(
+        Object.assign({}, fetchedProducts, duplicate_currentProducts_mainTabs)
+      );
+    }
+
     chrome.storage.local.get(
       [`crawlState_${tab.id}`, `crawlSites_${tab.id}`],
       (result) => {
@@ -112,7 +219,7 @@ export default function CrawlerPage() {
       }
     );
 
-    chrome.storage.local.get(["crawlState", "settings"], (result) => {
+    chrome.storage.local.get(["settings"], (result) => {
       let SettingsStorageObject: Record<string, boolean> = {};
 
       if (result.settings) {
@@ -142,40 +249,71 @@ export default function CrawlerPage() {
     chrome.runtime.sendMessage({ type: "POPUP_OPENED" });
 
     getCurrentTab();
+    EventListener();
+  }, []);
 
+  useEffect(() => {
     const handler = (
       message: {
         type: string;
         status: "products_list";
         origin: string;
-        data: Array<{
-          title: string;
-          link: string;
-          imgSrc: string;
-          sold: string;
-          rating: string;
-
-          delivery: string;
-          source: string;
-        }>;
+        data: Array<Product>;
       },
       sender: chrome.runtime.MessageSender
     ) => {
       if (message.type === "ALERT_USER") {
         console.log("Message from background:", sender, message);
+        const currentMarketplace = getCurrentMarketplaceFromURL(message.origin);
+
+        // Only include valid SupportedMarketplace keys
+        const fetchedMarketplaces: SupportedMarketplace[] = [
+          ...Object.keys(fetchedProducts).filter(
+            (key): key is SupportedMarketplace =>
+              (availableMarketplaceToFetch as string[]).includes(key)
+          ),
+          ...(currentMarketplace !== "Not found" ? [currentMarketplace] : []),
+        ];
+
+        // console.log(
+        //   "fetchedMarketplaces :",
+        //   fetchedMarketplaces,
+        //   availableMarketplaceToFetch
+        // );
+
+        const isFetchingDone =
+          AreTheseTwoArraysEqualUnordered<SupportedMarketplace>(
+            fetchedMarketplaces,
+            availableMarketplaceToFetch
+          );
+
+        // console.log(isFetchingDone);
+
+        setFetchedProducts((prev) =>
+          Object.assign({}, prev, {
+            [currentMarketplace]: message.data,
+          })
+        );
+        // console.log(fetchedProducts);
+
+        if (isFetchingDone) {
+          setIsFetching(false);
+        }
+        // console.log(isFetchingDone);
+
         // alert(message.payload);
       }
     };
 
     chrome.runtime.onMessage.addListener(handler);
 
-    EventListener();
-
     // Cleanup to avoid memory leaks
     return () => {
       chrome.runtime.onMessage.removeListener(handler);
     };
-  }, []);
+  }, [availableMarketplaceToFetch, fetchedProducts]);
+
+  console.log("fetchedProducts", fetchedProducts);
 
   if (availableMarketplaceToFetch.length == 0) {
     return (
@@ -279,22 +417,34 @@ export default function CrawlerPage() {
       </div>
 
       <div className="flex flex-col gap-4 mt-5">
-        <div>
-          <h2 className="text-xl">Shopee Indonesia</h2>
-          <p>Loading..</p>
-        </div>
-        <div>
-          <h2 className="text-xl">Lazada Indonesia</h2>
-          <p>Loading..</p>
-        </div>
-        <div>
-          <h2 className="text-xl">Toco Indonesia</h2>
-          <p>Loading..</p>
-        </div>
-        <div>
-          <h2 className="text-xl">OLX Indonesia</h2>
-          <p>Loading..</p>
-        </div>
+        {Object.keys(fetchedProducts).length > 0 ? (
+          Object.keys(fetchedProducts).map((marketplace) => {
+            return (
+              <div key={marketplace} className="relative">
+                <div className="sticky -top-9 pl-2 z-10 bg-white/90 backdrop-blur-sm py-1">
+                  <h2 className="text-xl font-semibold">
+                    {marketplaces[marketplace as SupportedMarketplace].name}
+                  </h2>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  {fetchedProducts[marketplace as SupportedMarketplace].map(
+                    (product: Product) => (
+                      <ProductCard
+                        key={product.link}
+                        data={product}
+                        variant={variant}
+                      />
+                    )
+                  )}
+                </div>
+              </div>
+            );
+          })
+        ) : (
+          <div className="text-center">
+            <p className="text-lg">No products found.</p>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -16,11 +16,11 @@
  * @returns {void}
  */
 
-function AreTheseTwoArraysEqual(arr1, arr2) {
-  if (arr1.length !== arr2.length) {
-    return false;
-  }
-  return arr1.every((value, index) => value === arr2[index]);
+function AreTheseTwoArraysEqualUnordered(arr1, arr2) {
+  if (arr1.length !== arr2.length) return false;
+  const sorted1 = [...arr1].sort();
+  const sorted2 = [...arr2].sort();
+  return sorted1.every((value, index) => value === sorted2[index]);
 }
 
 class CancellableEvent {
@@ -91,12 +91,12 @@ chrome.runtime.onInstalled.addListener(() => {
   console.log("Extension ssinstalledss.");
 });
 
-let currentTabId = 0; // this the tabId when user focuses on specific tab to do scraping (some of marketplaces has lazy loaded image where user has to presence in the tab)
-let mainTabId = 0; // this is the mainTab user is currently scraping the data for
-let tabIdNeedToFocusQueues = []; // this is queue for tabs that user need to focus in order to scrape it
+var currentTabId = 0; // this the tabId when user focuses on specific tab to do scraping (some of marketplaces has lazy loaded image where user has to presence in the tab)
+var mainTabId = 0; // this is the mainTab user is currently scraping the data for
+var tabIdNeedToFocusQueues = []; // this is queue for tabs that user need to focus in order to scrape it
 // let tabIdsNeedToFocus = [];
 
-let openedMainTabsId = [];
+var openedMainTabsId = [];
 
 async function IsFetchingDone(fetchedSites) {
   const result = await chrome.storage.local.get([`crawlSites_${mainTabId}`]);
@@ -111,7 +111,7 @@ async function IsFetchingDone(fetchedSites) {
       result[`crawlSites_${mainTabId}`]
     );
 
-    return AreTheseTwoArraysEqual(
+    return AreTheseTwoArraysEqualUnordered(
       fetchedSites,
       result[`crawlSites_${mainTabId}`]
     );
@@ -124,6 +124,10 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
   console.log("[background] Received:", message);
 
   if (message.type === "POPUP_OPENED") {
+    if (!tabIdNeedToFocusQueues) {
+      tabIdNeedToFocusQueues = [];
+    }
+
     console.log("Popup was opened");
 
     chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
@@ -225,15 +229,22 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
           [message.origin]: newProductData,
         },
       });
-      // console.log("FETCHED SITESS ", draft_products_mainTabs);
+      console.log("FETCHED SITESS ", draft_products_mainTabs);
 
       if (mainTabId in draft_products_mainTabs) {
         fetchedSites = Object.keys(draft_products_mainTabs[mainTabId]);
 
         const isFetchingDone = await IsFetchingDone(fetchedSites);
 
+        console.log("isFetchingDone", isFetchingDone);
         if (isFetchingDone) {
           chrome.storage.local.set({ [`crawlState_${mainTabId}`]: "fetched" });
+          chrome.runtime.sendMessage({
+            type: "ALERT_USER",
+            status: "fetch_status",
+            origin: message.origin,
+            data: "fetched",
+          });
         }
         // console.log("FETCHED isFetchingDone ", fetchedSites, isFetchingDone);
       }
@@ -315,7 +326,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
  *
  * @param {TargetSites} crawlTargetSites
  */
-function CrawlSite(crawlTargetSites, currentQuery) {
+async function CrawlSite(crawlTargetSites, currentQuery) {
   const ids_markpetlace = {};
   const marketplaces = {};
   const marketplaceMessagesSentStatus = {};
@@ -323,6 +334,19 @@ function CrawlSite(crawlTargetSites, currentQuery) {
   const events = new Events();
 
   let marketplacesToCrawl = crawlTargetSites.map((data) => data.url);
+
+  const products_mainTabs = await chrome.storage.local.get([
+    "products_mainTabs",
+  ]);
+  chrome.storage.local.set({
+    products_mainTabs: Object.assign(
+      {},
+      {
+        ...products_mainTabs,
+        [mainTabId]: {},
+      }
+    ),
+  });
 
   chrome.storage.local.set({
     [`crawlSites_${mainTabId}`]: marketplacesToCrawl,
@@ -337,10 +361,10 @@ function CrawlSite(crawlTargetSites, currentQuery) {
         active: false,
       },
       async (createdTab) => {
-        console.log("CREATED TAB ", createdTab);
+        // console.log("CREATED TAB ", createdTab);
         ids_markpetlace[createdTab.id] = data.site;
 
-        console.log("CREATED TAB ", createdTab);
+        // console.log("CREATED TAB ", createdTab);
 
         marketplaces[data.site] = data;
 
