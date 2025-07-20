@@ -184,6 +184,8 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
     const crawlTargetSites = payload.crawlTargetSites;
     // return true;
 
+    console.log("[background] CRAWL TAB NOW ", crawlTargetSites, payload);
+
     CrawlSite(crawlTargetSites, payload.currentQuery);
     chrome.storage.local.set({ [`crawlState_${mainTabId}`]: "fetching" });
 
@@ -250,7 +252,7 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
       }
 
       chrome.storage.local.set({
-        products_mainTabs: Object.assign({}, draft_products_mainTabs),
+        products_mainTabs: draft_products_mainTabs,
       });
     });
 
@@ -315,7 +317,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
         delete draft_products_mainTabs[tabId];
 
         chrome.storage.local.set({
-          products_mainTabs: Object.assign({}, draft_products_mainTabs),
+          products_mainTabs: draft_products_mainTabs,
         });
       }
     }
@@ -335,17 +337,12 @@ async function CrawlSite(crawlTargetSites, currentQuery) {
 
   let marketplacesToCrawl = crawlTargetSites.map((data) => data.url);
 
-  const products_mainTabs = await chrome.storage.local.get([
-    "products_mainTabs",
-  ]);
+  const result = await chrome.storage.local.get(["products_mainTabs"]);
   chrome.storage.local.set({
-    products_mainTabs: Object.assign(
-      {},
-      {
-        ...products_mainTabs,
-        [mainTabId]: {},
-      }
-    ),
+    products_mainTabs: Object.assign({
+      ...result.products_mainTabs,
+      [mainTabId]: {},
+    }),
   });
 
   chrome.storage.local.set({

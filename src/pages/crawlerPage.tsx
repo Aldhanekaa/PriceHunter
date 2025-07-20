@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   IsThisSiteSupported,
   marketplaces,
@@ -25,10 +25,85 @@ type Product = {
 
 type Variant = "horizontal-row" | "vertical-row" | "grid";
 
-function ProductCard({ data, variant }: { data: Product; variant: Variant }) {
+function getQueryFromURL(url: string, key: string): string | null {
+  // Find the query string part
+  const queryStart = url.indexOf("?");
+  if (queryStart === -1) return null;
+  const queryString = url.slice(queryStart + 1);
+  // Split into key-value pairs
+  const pairs = queryString.split("&");
+  for (const pair of pairs) {
+    const [k, v] = pair.split("=");
+    if (decodeURIComponent(k) === key) {
+      let value = v ? decodeURIComponent(v) : "";
+      // Replace + with space and handle other space encodings if needed
+      value = value.replace(/\+/g, " ");
+      return value;
+    }
+  }
+  return null;
+}
+
+function ProductCard({
+  data,
+  variant,
+  className = "",
+}: {
+  data: Product;
+  variant: Variant;
+  className?: string;
+}) {
+  if (variant === "vertical-row") {
+    return (
+      <div
+        className={`flex flex-row items-center gap-3 rounded-lg border border-gray-100 bg-white shadow-sm p-2 ${className} max-w-none`}
+      >
+        <a
+          className="flex-shrink-0 w-16 h-16 rounded-md overflow-hidden"
+          href={data.link}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <img
+            className="object-cover w-full h-full"
+            src={data.imgSrc}
+            alt={data.title}
+          />
+        </a>
+        <div className="flex flex-col flex-1 min-w-0">
+          <a href={data.link} target="_blank" rel="noopener noreferrer">
+            <h5 className="text-sm font-semibold tracking-tight text-blue-900 line-clamp-2">
+              {data.title}
+            </h5>
+          </a>
+          <div className="flex items-center gap-2 mt-1 mb-1">
+            <span className="text-base font-bold text-blue-600">
+              {data.price}
+            </span>
+            <span className="flex items-center gap-1">
+              <StarIcon className="w-3 h-3" />
+              <span className="rounded bg-yellow-200 px-1 py-0.5 text-xs font-semibold">
+                {data.rating ? data.rating : "-"}
+              </span>
+            </span>
+            <span className="text-xs text-gray-500 ml-2">{data.sold}</span>
+          </div>
+          <a
+            href={data.link}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-1 bg-neutral-900 flex items-center justify-center rounded px-2 py-1 text-center text-xs font-medium w-max"
+          >
+            <span className="text-white">View</span>
+          </a>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
-      className={`relative flex w-full max-w-xs flex-col overflow-hidden rounded-lg border border-gray-100 bg-white shadow-sm product-card-${variant} p-1`}
+      className={`relative flex flex-col overflow-hidden rounded-lg border border-gray-100 bg-white shadow-sm product-card-${variant} p-1 ${className}`}
     >
       <a
         className="relative mx-1 mt-1 flex h-40 overflow-hidden rounded-md"
@@ -83,7 +158,7 @@ function ProductCard({ data, variant }: { data: Product; variant: Variant }) {
 }
 
 export default function CrawlerPage() {
-  const [variant] = useState<Variant>("horizontal-row");
+  const [variant, setVariant] = useState<Variant>("grid");
 
   const [isFetching, setIsFetching] = useState(false);
   const [availableMarketplaceToFetch, setAvailableMarketplaceToFetch] =
@@ -100,13 +175,41 @@ export default function CrawlerPage() {
     SupportedMarketplace | "Not Loaded"
   >("Not Loaded");
 
+  const [isDragging, setIsDragging] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const dragData = useRef({ startX: 0, scrollLeft: 0 });
+
+  function onMouseDown(e: React.MouseEvent) {
+    if (variant !== "horizontal-row") return;
+    setIsDragging(true);
+    dragData.current = {
+      startX: e.pageX - (scrollRef.current?.offsetLeft || 0),
+      scrollLeft: scrollRef.current?.scrollLeft || 0,
+    };
+  }
+
+  function onMouseMove(e: React.MouseEvent) {
+    if (!isDragging || variant !== "horizontal-row") return;
+    if (!scrollRef.current) return;
+    const x = e.pageX - scrollRef.current.offsetLeft;
+    const walk = x - dragData.current.startX;
+    scrollRef.current.scrollLeft = dragData.current.scrollLeft - walk;
+  }
+
+  function onMouseUp() {
+    setIsDragging(false);
+  }
+
   function getCurrentQuery() {
     if (
       currentMarketplace !== "Not Loaded" &&
       marketplaces[currentMarketplace]
     ) {
-      const queries = new URLSearchParams(url.current);
-      return queries.get(marketplaces[currentMarketplace].queryKey);
+      // Use the new native function
+      return getQueryFromURL(
+        url.current,
+        marketplaces[currentMarketplace].queryKey
+      );
     }
     return null;
   }
@@ -250,6 +353,66 @@ export default function CrawlerPage() {
 
     getCurrentTab();
     EventListener();
+
+    async function onTabUpdatedHandler(tabId: number) {
+      const queryOptions = { active: true, lastFocusedWindow: true };
+      const [tab] = await chrome.tabs.query(queryOptions);
+
+      if (tab && "url" in tab && tab.url && tab.id == tabId) {
+        url.current = tab.url;
+        origin.current = new URL(tab.url).origin;
+
+        const result = await chrome.storage.local.get("products_mainTabs");
+        console.log("URL CHANGED!", result);
+
+        if ("products_mainTabs" in result) {
+          chrome.storage.local.set({
+            products_mainTabs: Object.assign({}, result.products_mainTabs, {
+              [String(tab.id)]: {},
+            }),
+          });
+
+          if (currentMarketplace != "Not Loaded" && !isFetching) {
+            console.log("CRAWLLL GIRLL!", result);
+
+            setIsFetching(true);
+            const crawlTargetSites = [];
+            const currentQuery = getCurrentQuery();
+
+            for (const marketplace of availableMarketplaceToFetch) {
+              if (currentMarketplace != marketplace) {
+                crawlTargetSites.push(marketplaces[marketplace]);
+              }
+            }
+
+            console.log("CRAWLLL currentQuery!", currentQuery);
+
+            console.log(
+              "availableMarketplaceToFetch",
+              availableMarketplaceToFetch
+            );
+
+            console.log("DO CRAWL NOW !!!");
+            chrome.runtime.sendMessage({
+              type: "CRAWL_TAB_NOW",
+              payload: {
+                url: url.current,
+                marketplace: currentMarketplace,
+                crawlTargetSites: crawlTargetSites,
+                currentQuery: currentQuery,
+              },
+            });
+          }
+        }
+      }
+    }
+
+    chrome.tabs.onUpdated.addListener(onTabUpdatedHandler);
+
+    // Cleanup to avoid memory leaks
+    return () => {
+      chrome.tabs.onUpdated.removeListener(onTabUpdatedHandler);
+    };
   }, []);
 
   useEffect(() => {
@@ -264,44 +427,49 @@ export default function CrawlerPage() {
     ) => {
       if (message.type === "ALERT_USER") {
         console.log("Message from background:", sender, message);
-        const currentMarketplace = getCurrentMarketplaceFromURL(message.origin);
 
-        // Only include valid SupportedMarketplace keys
-        const fetchedMarketplaces: SupportedMarketplace[] = [
-          ...Object.keys(fetchedProducts).filter(
-            (key): key is SupportedMarketplace =>
-              (availableMarketplaceToFetch as string[]).includes(key)
-          ),
-          ...(currentMarketplace !== "Not found" ? [currentMarketplace] : []),
-        ];
-
-        // console.log(
-        //   "fetchedMarketplaces :",
-        //   fetchedMarketplaces,
-        //   availableMarketplaceToFetch
-        // );
-
-        const isFetchingDone =
-          AreTheseTwoArraysEqualUnordered<SupportedMarketplace>(
-            fetchedMarketplaces,
-            availableMarketplaceToFetch
+        if ("status" in message && message.status === "products_list") {
+          const currentMarketplace = getCurrentMarketplaceFromURL(
+            message.origin
           );
 
-        // console.log(isFetchingDone);
+          // Only include valid SupportedMarketplace keys
+          const fetchedMarketplaces: SupportedMarketplace[] = [
+            ...Object.keys(fetchedProducts).filter(
+              (key): key is SupportedMarketplace =>
+                (availableMarketplaceToFetch as string[]).includes(key)
+            ),
+            ...(currentMarketplace !== "Not found" ? [currentMarketplace] : []),
+          ];
 
-        setFetchedProducts((prev) =>
-          Object.assign({}, prev, {
-            [currentMarketplace]: message.data,
-          })
-        );
-        // console.log(fetchedProducts);
+          // console.log(
+          //   "fetchedMarketplaces :",
+          //   fetchedMarketplaces,
+          //   availableMarketplaceToFetch
+          // );
 
-        if (isFetchingDone) {
-          setIsFetching(false);
+          const isFetchingDone =
+            AreTheseTwoArraysEqualUnordered<SupportedMarketplace>(
+              fetchedMarketplaces,
+              availableMarketplaceToFetch
+            );
+
+          // console.log(isFetchingDone);
+
+          setFetchedProducts((prev) =>
+            Object.assign({}, prev, {
+              [currentMarketplace]: message.data,
+            })
+          );
+          // console.log(fetchedProducts);
+
+          if (isFetchingDone) {
+            setIsFetching(false);
+          }
+          // console.log(isFetchingDone);
+
+          // alert(message.payload);
         }
-        // console.log(isFetchingDone);
-
-        // alert(message.payload);
       }
     };
 
@@ -364,6 +532,18 @@ export default function CrawlerPage() {
     );
   }
 
+  function scrollLeft() {
+    if (scrollRef.current) {
+      scrollRef.current.scrollBy({ left: -200, behavior: "smooth" });
+    }
+  }
+  function scrollRight() {
+    if (scrollRef.current) {
+      scrollRef.current.scrollBy({ left: 200, behavior: "smooth" });
+    }
+  }
+
+  console.log("variant", variant);
   return (
     <div className="w-full h-full overflow-y-auto px-4 pt-8 pb-5">
       <div className="flex justify-center mb-3">
@@ -372,47 +552,68 @@ export default function CrawlerPage() {
         </span>
       </div>
 
-      <p className=" text-2xl font-medium text-center">Currently Searching</p>
+      <p className=" text-2xl font-medium text-center">
+        {Object.keys(fetchedProducts).length == 0
+          ? "Currently Searching"
+          : "Showing Results for"}
+      </p>
       <p className=" text-xl text-center">{getCurrentQuery()}</p>
 
-      <div className="flex justify-center py-5">
-        <button
-          type="button"
-          className="py-3 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700 focus:outline-hidden focus:bg-blue-700 disabled:opacity-50 disabled:pointer-events-none"
-          onClick={doCrawl}
-        >
-          {isFetching ? (
-            "Fetching.."
-          ) : (
-            <>
-              <span className=" text-sm">
-                {" "}
-                <ShoppingCart />
-              </span>
-              Find & Compare Similar Product!
-            </>
-          )}
-        </button>
-      </div>
+      {(Object.keys(fetchedProducts).length == 0 || isFetching) && (
+        <div className="flex justify-center py-5">
+          <button
+            type="button"
+            className="py-3 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700 focus:outline-hidden focus:bg-blue-700 disabled:opacity-50 disabled:pointer-events-none"
+            onClick={doCrawl}
+          >
+            {isFetching ? (
+              "Fetching.."
+            ) : (
+              <>
+                <span className=" text-sm">
+                  {" "}
+                  <ShoppingCart />
+                </span>
+                Find & Compare Similar Product!
+              </>
+            )}
+          </button>
+        </div>
+      )}
 
-      <div className="inline-flex rounded-lg shadow-2xs">
+      <div className="flex w-full mt-3 rounded-lg  justify-center items-center">
         <button
           type="button"
-          className="py-2 px-3 inline-flex justify-center items-center gap-2 -ms-px first:rounded-s-lg first:ms-0 last:rounded-e-lg text-sm font-medium focus:z-10 border border-gray-200 bg-white text-gray-800 shadow-2xs hover:bg-gray-50 focus:outline-hidden focus:bg-gray-50 disabled:opacity-50 disabled:pointer-events-none dark:bg-neutral-300 dark:border-neutral-200 dark:text-neutral-800 dark:hover:bg-neutral-200 dark:focus:bg-neutral-200"
+          className={`py-2 px-3 inline-flex justify-center items-center gap-2 -ms-px first:rounded-s-lg first:ms-0 last:rounded-e-lg text-sm font-medium focus:z-10 border border-gray-200 ${
+            variant === "grid"
+              ? "bg-neutral-200 text-gray-800 shadow-2xs hover:bg-gray-50 focus:outline-hidden"
+              : "bg-white text-gray-200 shadow-2xs hover:bg-gray-50 focus:outline-hidden"
+          } bg-neutral-300 border-neutral-200 text-neutral-800 hover:bg-neutral-200 focus:bg-neutral-200`}
+          onClick={() => setVariant("grid")}
         >
-          Small
+          Grid
         </button>
         <button
           type="button"
-          className="py-2 px-3 inline-flex justify-center items-center gap-2 -ms-px first:rounded-s-lg first:ms-0 last:rounded-e-lg text-sm font-medium focus:z-10 border border-gray-200 bg-white text-gray-200 shadow-2xs hover:bg-gray-50 focus:outline-hidden focus:bg-gray-50 disabled:opacity-50 disabled:pointer-events-none dark:bg-neutral-300 dark:border-neutral-200 dark:text-neutral-800 dark:hover:bg-neutral-200 dark:focus:bg-neutral-200"
+          className={`py-2 px-3 inline-flex justify-center items-center gap-2 -ms-px first:rounded-s-lg first:ms-0 last:rounded-e-lg text-sm font-medium focus:z-10 border border-gray-200 ${
+            variant === "vertical-row"
+              ? "bg-neutral-200 text-gray-800 shadow-2xs hover:bg-gray-50 focus:outline-hidden"
+              : "bg-white text-gray-200 shadow-2xs hover:bg-gray-50 focus:outline-hidden"
+          } bg-neutral-300 border-neutral-200 text-neutral-800 hover:bg-neutral-200 focus:bg-neutral-200`}
+          onClick={() => setVariant("vertical-row")}
         >
-          Small
+          List
         </button>
         <button
           type="button"
-          className="py-2 px-3 inline-flex justify-center items-center gap-2 -ms-px first:rounded-s-lg first:ms-0 last:rounded-e-lg text-sm font-medium focus:z-10 border border-gray-200 bg-white text-gray-200 shadow-2xs hover:bg-gray-50 focus:outline-hidden focus:bg-gray-50 disabled:opacity-50 disabled:pointer-events-none dark:bg-neutral-300 dark:border-neutral-200 dark:text-neutral-800 dark:hover:bg-neutral-200 dark:focus:bg-neutral-200"
+          className={`py-2 px-3 inline-flex justify-center items-center gap-2 -ms-px first:rounded-s-lg first:ms-0 last:rounded-e-lg text-sm font-medium focus:z-10 border border-gray-200 ${
+            variant === "horizontal-row"
+              ? "bg-neutral-200 text-gray-800 shadow-2xs hover:bg-gray-50 focus:outline-hidden"
+              : "bg-white text-gray-200 shadow-2xs hover:bg-gray-50 focus:outline-hidden"
+          } bg-neutral-300 border-neutral-200 text-neutral-800 hover:bg-neutral-200 focus:bg-neutral-200`}
+          onClick={() => setVariant("horizontal-row")}
         >
-          Small
+          Compact
         </button>
       </div>
 
@@ -426,16 +627,58 @@ export default function CrawlerPage() {
                     {marketplaces[marketplace as SupportedMarketplace].name}
                   </h2>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  {fetchedProducts[marketplace as SupportedMarketplace].map(
-                    (product: Product) => (
-                      <ProductCard
-                        key={product.link}
-                        data={product}
-                        variant={variant}
-                      />
-                    )
+                <div className="relative px-1">
+                  {variant === "horizontal-row" && (
+                    <>
+                      <button
+                        type="button"
+                        className="absolute -left-2 top-1/2 -translate-y-1/2 z-20 bg-white/80 rounded-full shadow p-1 hover:bg-gray-200"
+                        onClick={scrollLeft}
+                      >
+                        &#8592;
+                      </button>
+                      <button
+                        type="button"
+                        className="absolute -right-2 top-1/2 -translate-y-1/2 z-20 bg-white/80 rounded-full shadow p-1 hover:bg-gray-200"
+                        onClick={scrollRight}
+                      >
+                        &#8594;
+                      </button>
+                    </>
                   )}
+                  <div
+                    ref={variant === "horizontal-row" ? scrollRef : undefined}
+                    className={
+                      variant === "grid"
+                        ? "grid grid-cols-2 gap-4"
+                        : variant === "horizontal-row"
+                        ? `w-full flex flex-row flex-nowrap gap-2 overflow-x-auto cursor-grab ${
+                            isDragging ? "cursor-grabbing" : ""
+                          }`
+                        : "flex flex-col gap-2"
+                    }
+                    onMouseDown={onMouseDown}
+                    onMouseMove={onMouseMove}
+                    onMouseUp={onMouseUp}
+                    onMouseLeave={onMouseUp}
+                  >
+                    {fetchedProducts[marketplace as SupportedMarketplace].map(
+                      (product: Product) => (
+                        <ProductCard
+                          key={product.link}
+                          data={product}
+                          variant={variant}
+                          className={
+                            variant === "horizontal-row"
+                              ? " w-44 shrink-0"
+                              : `w-full ${
+                                  variant != "vertical-row" ? "max-w-xs" : ""
+                                }`
+                          }
+                        />
+                      )
+                    )}
+                  </div>
                 </div>
               </div>
             );
